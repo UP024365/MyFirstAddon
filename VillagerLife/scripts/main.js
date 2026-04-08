@@ -1,111 +1,108 @@
 import { world, system } from "@minecraft/server";
 import { showSpeechBubble, isVillagerTalking } from "./chatManager.js";
 import { getRoutineMessage } from "./scheduleManager.js";
-import { updateHunger, recoverHunger, removeVillagerData } from "./needsManager.js";
+import { 
+    updateHunger, 
+    removeVillagerData, 
+    pickupFoodOnGround, 
+    eatFromInventory 
+} from "./needsManager.js";
 import { updateSecurity } from "./securityManager.js";
+import { getWeatherMessage } from "./weatherManager.js";
 
-// --- [헬퍼 함수 1] 바닥 음식 줍기 ---
-function pickupFoodOnGround(villager, healthComp) {
-    const nearbyItems = villager.dimension.getEntities({
-        location: villager.location,
-        maxDistance: 2.5,
-        type: "minecraft:item"
-    });
-
-    for (const itemEntity of nearbyItems) {
-        const itemStack = itemEntity.getComponent("minecraft:item")?.itemStack;
-        if (!itemStack) continue;
-
-        const itemId = itemStack.typeId.toLowerCase();
-        if (itemId.includes("bread") || itemId.includes("apple") || itemId.includes("carrot") || itemId.includes("potato")) {
-            itemEntity.kill(); 
-            recoverHunger(villager, 50);
-            healthComp.setCurrentValue(healthComp.defaultValue);
-
-            showSpeechBubble(villager, "§d와! 주신 음식 정말 맛있게 잘 먹을게요!§r", 60, true);
-            
-            const { x, y, z } = villager.location;
-            villager.dimension.runCommandAsync(`playsound random.pop @a ${x} ${y} ${z}`).catch(()=>{}); 
-            return true; // 실제 아이템을 먹었으므로 true (행동 완료)
-        }
-    }
-    return false;
-}
-
-// --- [헬퍼 함수 2] 인벤토리 식사 또는 배고픔 호소 ---
-function eatFromInventory(villager, currentHunger, healthComp) {
-    if (currentHunger <= 30 || healthComp.currentValue < healthComp.defaultValue) {
-        const inventory = villager.getComponent("minecraft:inventory")?.container;
-        let foodSlot = -1;
-
-        if (inventory) {
-            for (let i = 0; i < inventory.size; i++) {
-                const item = inventory.getItem(i);
-                if (!item) continue;
-                if (["bread", "apple", "carrot", "potato"].some(f => item.typeId.includes(f))) {
-                    foodSlot = i;
-                    break;
-                }
-            }
-        }
-
-        if (foodSlot !== -1) {
-            const item = inventory.getItem(foodSlot);
-            if (item.amount > 1) { item.amount -= 1; inventory.setItem(foodSlot, item); }
-            else { inventory.setItem(foodSlot, undefined); }
-
-            recoverHunger(villager, 70);
-            healthComp.setCurrentValue(healthComp.defaultValue);
-            showSpeechBubble(villager, "§b(냠냠...) 아껴뒀던 음식을 먹어야지.§r", 60, true);
-            return true; // 실제 식사를 했으므로 true (행동 완료)
-        } else if (currentHunger < 10) {
-            // 배고프다고 말만 하는 건 '행동'으로 치지 않음 (false 반환)
-            if (!isVillagerTalking(villager.id)) {
-                showSpeechBubble(villager, "§c배고파서 기운이 없어...§r", 40);
-            }
-        }
-    }
-    return false; 
-}
-
-// --- 메인 루프 ---
+// ==========================================
+// --- 메인 루프 (30틱 마다 실행) ---
+// ==========================================
 system.runInterval(() => {
-    // 오버월드 전체 주민 대상 (중복 연산 방지)
-    const villagers = world.getDimension("overworld").getEntities({ families: ["villager"] });
+    try {
+        const villagers = world.getDimension("overworld").getEntities({ 
+            type: "minecraft:villager_v2" 
+        });
 
-    for (const villager of villagers) {
-        if (!villager.isValid()) continue;
+        for (const villager of villagers) {
+            if (!villager || !villager.isValid()) continue;
 
-        const healthComp = villager.getComponent("minecraft:health");
-        if (!healthComp) continue;
+            try {
+                const healthComp = villager.getComponent("minecraft:health");
+                if (!healthComp) continue;
 
-        const isUnderAttack = updateSecurity(villager);
-        const currentHunger = updateHunger(villager);
+                const isUnderAttack = updateSecurity(villager);
+                const currentHunger = updateHunger(villager);
 
-        if (isUnderAttack) continue; // 위협 시 루틴 중단
-        if (pickupFoodOnGround(villager, healthComp)) continue; // 음식 주우면 루틴 중단
-        if (eatFromInventory(villager, currentHunger, healthComp)) continue; // 밥 먹으면 루틴 중단
+                if (isUnderAttack) continue; 
 
-        // 일상 대사 (확률 조정: 3% 확률로 약 5~10초에 한 번씩)
-        if (!isVillagerTalking(villager.id)) {
-            if (Math.random() < 0.03) {
-                let message = getRoutineMessage(villager);
-                showSpeechBubble(villager, message, 60);
+                // 대화 중이 아닐 때만 판단
+                if (!isVillagerTalking(villager.id)) {
+                    
+                    // 1. 날씨 체크 (비/눈이 오면 일상 대사보다 우선순위를 높임)
+                    const weatherMsg = getWeatherMessage(villager);
+                    if (weatherMsg) {
+                        // 비가 올 때는 40~50% 정도로 확률을 높이면 더 자주 반응합니다.
+                        if (Math.random() < 0.4) {
+                            showSpeechBubble(villager, weatherMsg, 60);
+                            world.sendMessage(`§3[DEBUG] 주민(${villager.id.slice(-4)}) 날씨 반응: ${weatherMsg}§r`);
+                            continue; // 날씨 반응을 했으면 이번 루프는 종료
+                        }
+                        // 날씨 반응 확률에 걸리지 않았더라도, 비가 오는 중엔 일상 대사를 아예 안 하게 하려면 
+                        // 여기서 return이나 continue를 고려할 수 있습니다.
+                    }
+
+                    // 2. 생존 필수 로직 (음식 줍기/먹기)
+                    if (pickupFoodOnGround(villager, healthComp)) continue; 
+                    if (eatFromInventory(villager, currentHunger, healthComp)) continue; 
+
+                    // 3. 일상 대사 (날씨가 맑을 때나 날씨 반응을 안 했을 때만)
+                    if (Math.random() < 0.1) { 
+                        let message = getRoutineMessage(villager);
+                        showSpeechBubble(villager, message, 60);
+                        world.sendMessage(`§e[DEBUG] 주민(${villager.id.slice(-4)}) 일상 대사: ${message}§r`);
+                    }
+                }
+            } catch (innerErr) {
+                console.warn(`주민 처리 오류: ${innerErr}`);
             }
         }
+    } catch (err) {
+        world.sendMessage(`§4[SYSTEM CRASH] 메인 루프 오류: ${err}§r`);
     }
 }, 30);
 
-// 피격 이벤트
+// ==========================================
+// --- 이벤트 리스너 ---
+// ==========================================
+
+// 피격 이벤트: 즉각적인 반응을 위해 afterEvents 사용
 world.afterEvents.entityHurt.subscribe((event) => {
-    const victim = event.hurtEntity; 
-    if (victim?.isValid() && victim.typeId === "minecraft:villager_v2") {
-        const cause = String(event.damageSource.cause).toLowerCase(); 
-        let msg = cause.includes("entity") ? "§4으악! 몹이다!§r" : "§c아야! 왜 때려!§r"; 
-        showSpeechBubble(victim, msg, 40, true); 
+    try {
+        const victim = event.hurtEntity; 
+        if (victim?.isValid() && victim.typeId === "minecraft:villager_v2") {
+            // damageSource가 없을 경우를 대비한 안전한 처리
+            const cause = event.damageSource?.cause ? String(event.damageSource.cause).toLowerCase() : "unknown";
+            let msg = cause.includes("entity") ? "§4으악! 몹이다!§r" : "§c아야! 왜 때려!§r"; 
+            
+            showSpeechBubble(victim, msg, 40, true); // 피격은 force=true로 기존 말 끊기
+            world.sendMessage(`§c[DEBUG] 주민 피격! 원인: ${cause}§r`);
+        }
+    } catch (err) {
+        console.error(`피격 이벤트 처리 오류: ${err}`);
     }
 });
 
+// 제거 이벤트: 메모리 관리를 위한 데이터 정리
 world.afterEvents.entityRemove.subscribe((event) => {
-    removeVillagerData(event.removedEntityId); 
+    try {
+        if (event.typeId === "minecraft:villager_v2") {
+            removeVillagerData(event.removedEntityId); 
+            // 텍스트 출력 시 slice 오류 방지
+            const shortId = event.removedEntityId ? event.removedEntityId.slice(-4) : "unknown";
+            world.sendMessage(`§7[DEBUG] 주민 데이터 제거됨 (ID: ${shortId})§r`);
+        }
+    } catch (err) {
+        console.error(`제거 이벤트 처리 오류: ${err}`);
+    }
+});
+
+// [시스템 체크] 모든 로직 로드 후 실행
+system.run(() => {
+    world.sendMessage("§a[시스템] VillagerLife 디버깅 모드 활성화 완료!§r");
 });
