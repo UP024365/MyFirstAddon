@@ -1,5 +1,3 @@
-import { BlockLocationIterator } from "@minecraft/server";
-
 export function findNearestBlock(entity, blockType, radius) {
     const { x, y, z } = entity.location;
     
