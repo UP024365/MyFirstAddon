@@ -4,16 +4,16 @@
     "description": "VillagerLife: Real-time Dev Mode",
     "name": "VillagerLife",
     "uuid": "a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5",
-    "version": [1, 0, 0],
-    "min_engine_version": [1, 20, 0]
+    "version": [1, 0, 1],
+    "min_engine_version": [1, 16, 0]
   },
   "modules": [
     {
-      "description": "Villager Life Script Module",
+      "description": "Script Module",
       "type": "script",
       "language": "javascript",
       "uuid": "f5e4d3c2-b1a0-49e8-bd7c-6a5b4c3d2e1f",
-      "version": [1, 0, 0],
+      "version": [1, 0, 1],
       "entry": "scripts/main.js"
     }
   ],

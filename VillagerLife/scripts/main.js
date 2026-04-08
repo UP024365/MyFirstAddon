@@ -3,6 +3,11 @@ import { showSpeechBubble } from "./chatManager.js";
 import { findNearestBlock } from "./utils.js";
 import { getCurrentRoutine } from "./scheduleManager.js";
 
+import { world, system } from "@minecraft/server";
+import { showSpeechBubble } from "./chatManager.js";
+import { findNearestBlock } from "./utils.js";
+import { getCurrentRoutine, getJobMessage } from "./scheduleManager.js"; // getJobMessage 임포트 추가
+
 system.runInterval(() => {
     for (const player of world.getAllPlayers()) {
         const nearbyVillagers = player.dimension.getEntities({
@@ -18,13 +23,12 @@ system.runInterval(() => {
             const currentHealth = healthComp.currentValue;
             const maxHealth = healthComp.defaultValue;
 
-            // 체력이 깎인 상태를 '배고픔'으로 해석
+            // 1. 배고픔(체력 감소) 상태 체크 (최우선순위)
             if (currentHealth < maxHealth) {
                 const chestPos = findNearestBlock(villager, "minecraft:chest", 10);
 
                 if (chestPos) {
                     villager.teleport(villager.location, { facingLocation: chestPos });
-                    // 요청하신 부드러운 멘트로 수정
                     showSpeechBubble(villager, `§6배고파... 밥 좀 먹어야겠어. [허기: ${currentHealth}]§r`, 40);
 
                     const dist = Math.sqrt(
@@ -40,9 +44,21 @@ system.runInterval(() => {
                 } else {
                     showSpeechBubble(villager, `§c너무 배고픈데... 근처에 식량 저장고(상자)가 없나?§r`, 40);
                 }
-            } else {
-                const routineMessage = getCurrentRoutine();
-                showSpeechBubble(villager, routineMessage, 60);
+            } 
+            // 2. 건강한 상태일 때 (직업 및 시간대 루틴)
+            else {
+                const time = world.getTimeOfDay();
+                let message;
+
+                // 낮 시간대(2000~12000 틱, 마크 기준 오전~오후)에는 직업 대사를 우선 출력
+                if (time >= 2000 && time < 12000) {
+                    message = getJobMessage(villager);
+                } else {
+                    // 아침, 저녁, 밤에는 기존 루틴 대사 출력
+                    message = getCurrentRoutine();
+                }
+                
+                showSpeechBubble(villager, message, 60);
             }
         }
     }
