@@ -1,6 +1,8 @@
 // weatherManager.js
 import { world } from "@minecraft/server";
 
+world.sendMessage("§b[모듈 로드] weatherManager.js 연결 완료§r");
+
 export function getWeatherMessage(villager) {
     const dimension = world.getDimension("overworld");
     const location = villager.location;

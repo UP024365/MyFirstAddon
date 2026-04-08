@@ -1,6 +1,8 @@
 import { world } from "@minecraft/server";
 import { showSpeechBubble, isVillagerTalking } from "./chatManager.js";
 
+world.sendMessage("§b[모듈 로드] needsManager.js 연결 완료§r");
+
 // 주민의 허기 수치를 저장할 Map
 const villagerHunger = new Map();
 
