@@ -3,9 +3,9 @@
   "minecraft:client_entity": {
     "description": {
       "identifier": "custom:militia",
-      "materials": { "default": "entity_alphatest" },
+      "materials": { "default": "npc" }, 
       "textures": { "default": "textures/entity/militia" },
-      "geometry": { "default": "geometry.humanoid.custom" },
+      "geometry": { "default": "geometry.zombie" },
       "animations": {
         "move": "animation.humanoid.walk",
         "idle": "animation.humanoid.idle",
