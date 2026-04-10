@@ -1,10 +1,10 @@
 import { world, system } from "@minecraft/server";
 
 // 임포트 시작 로그
-world.sendMessage("§e[시스템] 모듈 임포트를 시작합니다...§r");
+world.sendMessage("§e[시스템] 통합 로그 및 대화 큐 시스템 임포트를 시작합니다...§r");
 
-import { showSpeechBubble, isVillagerTalking } from "./chatManager.js";
-import { getRoutineMessage } from "./scheduleManager.js";
+import { addDialogue, isVillagerTalking, clearDialogueQueue } from "./chatManager.js";
+import { handleRoutineDialogue } from "./scheduleManager.js";
 import { 
     updateHunger, 
     removeVillagerData, 
@@ -12,13 +12,21 @@ import {
     eatFromInventory 
 } from "./needsManager.js";
 import { updateSecurity } from "./securityManager.js";
-import { getWeatherMessage } from "./weatherManager.js";
-import { openVillagerMenu } from "./uiManager.js"; 
+import { handleWeatherDialogue } from "./weatherManager.js";
+import { openVillagerMenu } from "./uiManager.js";
+
+// --- [신규] 통합 로그 함수 ---
+/**
+ * 주민의 아이디와 현재 실행 중인 우선순위/행동을 채팅창에 출력합니다.
+ */
+function logAction(villager, priority, action) {
+    const vId = villager.id.slice(-4);
+    world.sendMessage(`§7[LOG][P${priority}] 주민(${vId}): ${action}§r`);
+}
 
 // 모든 임포트 완료 후 실행
 system.run(() => {
-    world.sendMessage("§a[시스템] 모든 모듈이 성공적으로 임포트되었습니다!§r");
-    world.sendMessage("§a[시스템] VillagerLife 디버깅 모드 활성화 완료!§r");
+    world.sendMessage("§a[시스템] VillagerLife 통합 로그 모드 활성화 완료!§r");
 });
 
 // ==========================================
@@ -38,50 +46,41 @@ system.runInterval(() => {
                 const healthComp = villager.getComponent("minecraft:health");
                 if (!healthComp) continue;
 
-                // --- [우선순위 0] 보안(생존) ---
-                // 공격받거나 주변에 좀비가 있으면 모든 행동 중단
-                const isUnderAttack = updateSecurity(villager);
-                if (isUnderAttack) {
-                    world.sendMessage(`§4[PRIORITY 0] 주민(${vId}) 보안 로직 작동 중...§r`);
+                // --- [순위 10] 보안(생존) ---
+                if (updateSecurity(villager)) {
+                    logAction(villager, 10, "위험 감지 및 보안 로직 가동");
                     continue; 
                 }
 
-                // 대화 중이라면 로직 건너뜀
-                if (isVillagerTalking(villager.id)) continue;
-
-                // --- [우선순위 1] 특수 명령(심시티 모드) ---
-                // UI를 통해 설정된 모드 확인 (IDLE, COLLECTING, REPAIRING)
-                const mode = villager.getDynamicProperty("village:mode") || "IDLE";
-                if (mode !== "IDLE") {
-                    world.sendMessage(`§a[PRIORITY 1] 주민(${vId}) 현재 업무 수행 중: ${mode}§r`);
-                    // 여기서 각 모드에 맞는 세부 함수를 호출할 수 있습니다.
-                    continue; 
-                }
-
-                // --- [우선순위 2] 생존(허기) ---
+                // --- [순위 5] 생존(허기) ---
                 const currentHunger = updateHunger(villager);
+                
                 if (pickupFoodOnGround(villager, healthComp)) {
-                    world.sendMessage(`§b[PRIORITY 2] 주민(${vId}) 바닥 음식 줍기 완료§r`);
-                    continue; 
+                    logAction(villager, 5, "바닥 음식 발견 및 섭취");
+                    continue;
                 }
+                
                 if (eatFromInventory(villager, currentHunger, healthComp)) {
-                    world.sendMessage(`§b[PRIORITY 2] 주민(${vId}) 인벤토리 식사 완료§r`);
-                    continue; 
-                }
-
-                // --- [우선순위 3] 환경 반응(날씨) ---
-                const weatherMsg = getWeatherMessage(villager);
-                if (weatherMsg && Math.random() < 0.4) {
-                    showSpeechBubble(villager, weatherMsg, 60);
-                    world.sendMessage(`§3[PRIORITY 3] 주민(${vId}) 날씨 반응: ${weatherMsg}§r`);
+                    logAction(villager, 5, "인벤토리 음식 섭취");
                     continue;
                 }
 
-                // --- [우선순위 4] 일반 일상 ---
-                if (Math.random() < 0.1) { 
-                    let message = getRoutineMessage(villager);
-                    showSpeechBubble(villager, message, 60);
-                    world.sendMessage(`§e[PRIORITY 4] 주민(${vId}) 일상 대사: ${message}§r`);
+                // 현재 주민이 말하는 중이면 일상 메시지 생성 제한
+                if (isVillagerTalking(villager.id)) continue;
+
+                // --- [순위 3] 환경 반응(날씨) ---
+                if (Math.random() < 0.4) {
+                    if (handleWeatherDialogue(villager)) {
+                        logAction(villager, 3, "날씨 변화 감지 및 반응");
+                        continue;
+                    }
+                }
+
+                // --- [순위 1] 일반 일상 ---
+                if (Math.random() < 0.08) { 
+                    if (handleRoutineDialogue(villager)) {
+                        logAction(villager, 1, "일상/직업 대사 생성");
+                    }
                 }
 
             } catch (innerErr) {
@@ -93,37 +92,31 @@ system.runInterval(() => {
     }
 }, 30);
 
-// ==========================================
 // --- 인터페이스 가로채기 (UI) ---
-// ==========================================
-
 world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
     const { player, target, itemStack } = event;
 
     if (target.typeId === "minecraft:villager_v2" && itemStack?.typeId === "minecraft:paper") {
-        // 거래창 차단
         event.cancel = true;
-
-        // UI 오픈
         system.run(() => {
-            openVillagerMenu(player, target);
+            try {
+                openVillagerMenu(player, target);
+                world.sendMessage(`§b[UI] 주민(${target.id.slice(-4)}) 관리 메뉴 호출됨§r`);
+            } catch (err) {
+                player.sendMessage("§c[오류] UI 실행 중 에러 발생: " + err);
+            }
         });
-        
-        world.sendMessage(`§b[UI] 주민(${target.id.slice(-4)}) 관리 메뉴 호출됨.§r`);
     }
 });
 
-// ==========================================
 // --- 이벤트 모니터링 ---
-// ==========================================
-
 world.afterEvents.entityHurt.subscribe((event) => {
     try {
         const victim = event.hurtEntity; 
         if (victim?.isValid() && victim.typeId === "minecraft:villager_v2") {
             const cause = event.damageSource?.cause || "unknown";
-            let msg = cause.includes("entity") ? "§4으악! 누가 날 공격해!§r" : "§c아야! 아파!§r"; 
-            showSpeechBubble(victim, msg, 40, true); 
+            const msg = cause.includes("entity") ? "§4으악! 누가 날 공격해!§r" : "§c아야! 아파!§r";
+            addDialogue(victim, msg, 40, 8);
             world.sendMessage(`§c[EVENT] 주민(${victim.id.slice(-4)}) 피격됨 (원인: ${cause})§r`);
         }
     } catch (err) {}
@@ -132,8 +125,9 @@ world.afterEvents.entityHurt.subscribe((event) => {
 world.afterEvents.entityRemove.subscribe((event) => {
     try {
         if (event.typeId === "minecraft:villager_v2") {
-            removeVillagerData(event.removedEntityId); 
-            world.sendMessage(`§7[EVENT] 주민 데이터 정리됨 (ID: ${event.removedEntityId.slice(-4)})§r`);
+            removeVillagerData(event.removedEntityId);
+            clearDialogueQueue(event.removedEntityId);
+            world.sendMessage(`§7[EVENT] 주민(${event.removedEntityId.slice(-4)}) 데이터 정리 완료§r`);
         }
     } catch (err) {}
 });
