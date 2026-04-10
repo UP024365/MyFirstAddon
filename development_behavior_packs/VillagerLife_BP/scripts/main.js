@@ -1,67 +1,78 @@
 import { world, system } from "@minecraft/server";
-import { addDialogue, isVillagerTalking, clearDialogueQueue } from "./chatManager.js";
+// [필독] import 문은 반드시 블록({}) 밖, 최상단에 위치해야 합니다.
+import { addDialogue, isVillagerTalking } from "./chatManager.js";
 import { handleRoutineDialogue } from "./scheduleManager.js";
-import { updateHunger, removeVillagerData, pickupFoodOnGround, eatFromInventory } from "./needsManager.js";
+import { updateHunger, pickupFoodOnGround, eatFromInventory } from "./needsManager.js";
 import { updateSecurity } from "./securityManager.js";
 import { handleWeatherDialogue } from "./weatherManager.js";
 import { openVillagerMenu } from "./uiManager.js";
 
+/**
+ * 전역 로그 출력 함수
+ */
 function logAction(villager, priority, action) {
     const vId = villager.id.slice(-4);
-    world.sendMessage(`§7[LOG][P${priority}] 주민(${vId}): ${action}§r`);
+    const type = villager.typeId === "custom:militia" ? "자경단" : "주민";
+    world.sendMessage(`§7[LOG][P${priority}] ${type}(${vId}): ${action}§r`);
 }
 
+// 스크립트 엔진이 이 파일을 읽자마자 뜨는 로그 (가장 먼저 확인해야 함)
+world.sendMessage("§e[시스템] VillagerLife 모드 로드 중...§r");
+
 system.run(() => {
-    world.sendMessage("§a[시스템] VillagerLife 통합 로그 모드 활성화 완료!§r");
+    // 월드 진입 시 출력되는 로그
+    world.sendMessage("§a[시스템] VillagerLife 통합 로그 모드 활성화 성공!§r");
 });
 
+// 메인 틱 루프 (30틱 = 1.5초 주기)
 system.runInterval(() => {
     try {
         const overworld = world.getDimension("overworld");
-        // [핵심] 일반 주민과 자경단을 모두 리스트에 포함시킵니다.
-        const normalVillagers = overworld.getEntities({ type: "minecraft:villager_v2" });
-        const militias = overworld.getEntities({ type: "custom:militia" });
-        const villagers = [...normalVillagers, ...militias];
+        // 일반 주민과 자경단 모두 검색
+        const villagers = [
+            ...overworld.getEntities({ type: "minecraft:villager_v2" }),
+            ...overworld.getEntities({ type: "custom:militia" })
+        ];
 
         for (const villager of villagers) {
-            if (!villager || !villager.isValid()) continue;
+            if (!villager?.isValid()) continue;
 
-            try {
-                const healthComp = villager.getComponent("minecraft:health");
-                if (!healthComp) continue;
+            const healthComp = villager.getComponent("minecraft:health");
+            if (!healthComp) continue;
 
-                if (updateSecurity(villager)) {
-                    logAction(villager, 10, "보안 로직 가동");
-                    continue; 
+            // 1. 보안 체크 (최우선)
+            if (updateSecurity(villager)) {
+                if (system.currentTick % 100 === 0) logAction(villager, 10, "보안 경계 작동");
+                continue; 
+            }
+
+            // 2. 허기 및 식사 로직
+            const currentHunger = updateHunger(villager);
+            if (pickupFoodOnGround(villager, healthComp)) logAction(villager, 5, "음식 습득");
+            if (eatFromInventory(villager, currentHunger, healthComp)) logAction(villager, 6, "식사 완료");
+
+            // 3. 대화 로직
+            if (!isVillagerTalking(villager.id)) {
+                if (Math.random() < 0.4 && handleWeatherDialogue(villager)) {
+                    logAction(villager, 3, "날씨 대화");
+                } else if (Math.random() < 0.08 && handleRoutineDialogue(villager)) {
+                    logAction(villager, 1, "일상 대화");
                 }
-
-                const currentHunger = updateHunger(villager);
-                if (pickupFoodOnGround(villager, healthComp)) continue;
-                if (eatFromInventory(villager, currentHunger, healthComp)) continue;
-
-                if (isVillagerTalking(villager.id)) continue;
-
-                if (Math.random() < 0.4 && handleWeatherDialogue(villager)) continue;
-                if (Math.random() < 0.08 && handleRoutineDialogue(villager)) continue;
-
-            } catch (innerErr) {
-                console.warn(`주민 루프 오류: ${innerErr}`);
             }
         }
     } catch (err) {
-        world.sendMessage(`§4[SYSTEM CRASH] 메인 루프 오류: ${err}§r`);
+        // 실행 중 에러가 나면 채팅창에 바로 표시
+        world.sendMessage(`§4[런타임 에러] ${err}§r`);
     }
 }, 30);
 
+// 종이로 우클릭 시 메뉴 호출
 world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
     const { player, target, itemStack } = event;
-    // [핵심] 자경단 상태에서도 UI가 열리도록 허용합니다.
-    const isVillagerType = target.typeId === "minecraft:villager_v2" || target.typeId === "custom:militia";
+    const isVillager = target.typeId === "minecraft:villager_v2" || target.typeId === "custom:militia";
 
-    if (isVillagerType && itemStack?.typeId === "minecraft:paper") {
+    if (isVillager && itemStack?.typeId === "minecraft:paper") {
         event.cancel = true;
-        system.run(() => {
-            openVillagerMenu(player, target);
-        });
+        system.run(() => openVillagerMenu(player, target));
     }
 });

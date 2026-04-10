@@ -1,9 +1,9 @@
 {
   "format_version": 2,
   "header": {
-    "description": "VillagerLife: Real-time Dev Mode",
-    "name": "VillagerLife",
-    "uuid": "a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5",
+    "description": "주민의 인공지능과 시스템을 담당하는 행동 팩입니다.",
+    "name": "VillagerLife BP", 
+    "uuid": "7ce1d23f-4d94-4d8d-b495-fa8de6efa335",
     "version": [1, 0, 1],
     "min_engine_version": [1, 20, 0]
   },
@@ -12,7 +12,7 @@
       "description": "Script Module",
       "type": "script",
       "language": "javascript",
-      "uuid": "f5e4d3c2-b1a0-49e8-bd7c-6a5b4c3d2e1f",
+      "uuid": "a073c12b-2deb-4fcb-a01a-edc9a7033368",
       "version": [1, 0, 1],
       "entry": "scripts/main.js"
     }
